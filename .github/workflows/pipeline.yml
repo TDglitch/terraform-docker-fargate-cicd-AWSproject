@@ -67,6 +67,13 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Debug build command
+        run: |
+          echo "REGISTRY=$ECR_REGISTRY"
+          echo "REPO=$ECR_REPOSITORY"
+          echo "TAG=$IMAGE_TAG"
+          echo "FULL=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
       - name: Build, tag, and push image
         id: build-image
         env:
