@@ -94,7 +94,7 @@ jobs:
       - name: Download task definition
         run: |
           aws ecs describe-task-definition \
-            --task-definition fargate-demo-task:1 \
+            --task-definition fargate-cicd-demo-task:1 \
             --query taskDefinition > task-definition.json
 
       - name: Update ECS task definition with new image
