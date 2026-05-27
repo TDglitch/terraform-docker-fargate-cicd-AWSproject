@@ -11,6 +11,9 @@ env:
   ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
 
 jobs:
+  # ────────────────────────────────────────────
+  # Runs on every push + PR
+  # ────────────────────────────────────────────
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -38,7 +41,7 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@v4
-      - name: Run Trivy vulnerability scanner
+      - name: Trivy filesystem scan
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
@@ -46,13 +49,17 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: 1
 
-  build-and-push:
-    name: Build & push to ECR
+  # ────────────────────────────────────────────
+  # Runs on main only — build + push + deploy
+  # in ONE job so image URI is a plain shell
+  # variable; no cross-job output wiring at all.
+  # ────────────────────────────────────────────
+  deploy:
+    name: Build, Push & Deploy
     runs-on: ubuntu-latest
     needs: security-scan
-    if: github.ref == 'refs/heads/main'
-    outputs:
-      image: ${{ steps.build-image.outputs.image }}
+    if: github.ref == 'refs/heads/main'   # ← single guard, one place
+
     steps:
       - uses: actions/checkout@v4
 
@@ -67,83 +74,37 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Debug ECR login
-        run: echo "${{ steps.login-ecr.outputs.registry }}"
-
-      - name: Debug repo secret
-        run: echo "REPO=${{ secrets.ECR_REPOSITORY }}"
-
-      - name: Debug build command
-        env: 
+      - name: Build, tag, and push image to ECR
+        id: build-image
+        env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          echo "REGISTRY=$ECR_REGISTRY"
-          echo "REPO=$ECR_REPOSITORY"
-          echo "TAG=$IMAGE_TAG"
-          echo "FULL=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-
-      - name: Build, tag, and push image
-        id: build-image
-        run: |
-          set -e
-
-          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
-          ECR_REPOSITORY="${{ secrets.ECR_REPOSITORY }}"
-          IMAGE_TAG="${{ github.sha }}"
-
-          IMAGE_URI="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
-
-          echo "IMAGE_URI=$IMAGE_URI"
-
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
           docker build -t "$IMAGE_URI" .
           docker push "$IMAGE_URI"
-
-          # FORCE output (no ambiguity)
           echo "image=$IMAGE_URI" >> "$GITHUB_OUTPUT"
 
-      - name: Debug image output
-        run: echo "IMAGE=${{ steps.build-image.outputs.image }}"
-        
-
-  deploy:
-    name: Deploy to ECS Fargate
-    runs-on: ubuntu-latest
-    needs: build-and-push
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Debug incoming image
-        run: echo "IMAGE=${{ needs.build-and-push.outputs.image }}"
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Download task definition
+      # Pulls the live task definition from AWS — no stale JSON in the repo
+      - name: Download current task definition
         run: |
           aws ecs describe-task-definition \
-            --task-definition fargate-cicd-demo-task:1 \
-            --query taskDefinition > task-definition.json
+            --task-definition fargate-cicd-demo-task \
+            --query taskDefinition \
+            > task-definition.json
 
-      - name: Update ECS task definition with new image
+      - name: Render new task definition with updated image
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
           task-definition: task-definition.json
           container-name: ${{ secrets.CONTAINER_NAME }}
-          image: ${{ needs.build-and-push.outputs.image }}
+          image: ${{ steps.build-image.outputs.image }}   # same job → always set
 
-      - name: Deploy to ECS
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      - name: Deploy to ECS Fargate
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2  # v1 deprecated
         with:
           task-definition: ${{ steps.task-def.outputs.task-definition }}
           service: ${{ secrets.ECS_SERVICE }}
           cluster: ${{ secrets.ECS_CLUSTER }}
           wait-for-service-stability: true
-
-     
