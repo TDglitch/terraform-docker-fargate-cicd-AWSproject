@@ -106,6 +106,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Debug incoming image
+        run: echo "IMAGE=${{ needs.build-and-push.outputs.image }}"
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -135,6 +138,4 @@ jobs:
           cluster: ${{ secrets.ECS_CLUSTER }}
           wait-for-service-stability: true
 
-      - name: Debug incoming image
-        run: echo "IMAGE=${{ needs.build-and-push.outputs.image }}"
-
+     
