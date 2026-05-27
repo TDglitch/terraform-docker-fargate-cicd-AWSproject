@@ -86,14 +86,22 @@ jobs:
 
       - name: Build, tag, and push image
         id: build-image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
-          IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          set -e
+
+          ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          ECR_REPOSITORY="${{ secrets.ECR_REPOSITORY }}"
+          IMAGE_TAG="${{ github.sha }}"
+
+          IMAGE_URI="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+
+          echo "IMAGE_URI=$IMAGE_URI"
+
+          docker build -t "$IMAGE_URI" .
+          docker push "$IMAGE_URI"
+
+          # FORCE output (no ambiguity)
+          echo "image=$IMAGE_URI" >> "$GITHUB_OUTPUT"
 
       - name: Debug image output
         run: echo "IMAGE=${{ steps.build-image.outputs.image }}"
